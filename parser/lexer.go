@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -21,7 +22,7 @@ type Token struct {
 }
 
 func (t Token) String() string {
-	return fmt.Sprintf("%d: %v(\"%s\")", t.pos, t.kind, t.value)
+	return fmt.Sprintf("%v(\"%s\")", t.kind, t.value)
 }
 
 type tokenType int
@@ -120,7 +121,7 @@ func (l *Lexer) Run() []Token {
 			break
 		}
 
-		tokens = append(tokens, token)
+		tokens = append(tokens, *token)
 
 		if token.kind == EOF {
 			break
@@ -130,19 +131,17 @@ func (l *Lexer) Run() []Token {
 	return tokens
 }
 
-func (l *Lexer) readToken() (Token, error) {
+func (l *Lexer) readToken() (*Token, error) {
 
 	positionAfterWhitespace(l)
 
 	if l.currPos >= len(l.source) {
-		return Token{EOF, "", l.currPos}, nil
+		return &Token{EOF, "", l.currPos}, nil
 	}
 
 	startPos := l.currPos
 	firstChar, size := utf8.DecodeRuneInString(l.source[l.currPos:])
 	l.currPos += size
-
-	// fmt.Printf("%c\n", firstChar)
 
 	if firstChar < 0x0020 && firstChar != 0x0009 && firstChar != 0x000A && firstChar != 0x000D {
 		log.Fatalf("Invalid character %U", firstChar)
@@ -158,34 +157,34 @@ func (l *Lexer) readToken() (Token, error) {
 				break //end of comment
 			}
 		}
-		return Token{kind: COMMENT, value: l.source[startPos:l.currPos], pos: startPos}, nil
+		return &Token{kind: COMMENT, value: l.source[startPos:l.currPos], pos: startPos}, nil
 	case firstChar == '{':
-		return Token{BRACE_L, "{", startPos}, nil
+		return &Token{BRACE_L, "{", startPos}, nil
 	case firstChar == '}':
-		return Token{BRACE_R, "}", startPos}, nil
+		return &Token{BRACE_R, "}", startPos}, nil
 	case firstChar == '!':
-		return Token{BANG, "!", startPos}, nil
+		return &Token{BANG, "!", startPos}, nil
 	case firstChar == '$':
-		return Token{DOLLAR, "$", startPos}, nil
+		return &Token{DOLLAR, "$", startPos}, nil
 	case firstChar == '(':
-		return Token{PAREN_L, "(", startPos}, nil
+		return &Token{PAREN_L, "(", startPos}, nil
 	case firstChar == ')':
-		return Token{PAREN_R, ")", startPos}, nil
+		return &Token{PAREN_R, ")", startPos}, nil
 	case strings.HasPrefix(l.source[startPos:], "..."):
 		l.currPos = startPos + 3
-		return Token{SPREAD, "...", startPos}, nil
+		return &Token{SPREAD, "...", startPos}, nil
 	case firstChar == ':':
-		return Token{COLON, ":", startPos}, nil
+		return &Token{COLON, ":", startPos}, nil
 	case firstChar == '=':
-		return Token{EQUALS, "=", startPos}, nil
+		return &Token{EQUALS, "=", startPos}, nil
 	case firstChar == '@':
-		return Token{AT, "@", startPos}, nil
+		return &Token{AT, "@", startPos}, nil
 	case firstChar == '[':
-		return Token{BRACKET_L, "[", startPos}, nil
+		return &Token{BRACKET_L, "[", startPos}, nil
 	case firstChar == ']':
-		return Token{BRACKET_R, "]", startPos}, nil
+		return &Token{BRACKET_R, "]", startPos}, nil
 	case firstChar == '|':
-		return Token{PIPE, "|", startPos}, nil
+		return &Token{PIPE, "|", startPos}, nil
 	case ('_' == firstChar) || (firstChar >= 'A' && firstChar <= 'Z') || (firstChar >= 'a' && firstChar <= 'z'):
 		for l.currPos < len(l.source) {
 			ch, size := utf8.DecodeRuneInString(l.source[l.currPos:])
@@ -195,7 +194,7 @@ func (l *Lexer) readToken() (Token, error) {
 				break //end of comment
 			}
 		}
-		return Token{kind: NAME, value: l.source[startPos:l.currPos], pos: startPos}, nil
+		return &Token{kind: NAME, value: l.source[startPos:l.currPos], pos: startPos}, nil
 	case (firstChar >= '0' && firstChar <= '9') || firstChar == '-':
 		isFloat := false
 		var code = firstChar
@@ -210,7 +209,7 @@ func (l *Lexer) readToken() (Token, error) {
 			code, size = utf8.DecodeRuneInString(l.source[l.currPos:])
 			l.currPos += size
 			if code >= '0' && code <= '9' {
-				return Token{}, lexError(fmt.Sprintf("Invalid number, unexpected digit after 0: %c", code))
+				return &Token{}, lexError(fmt.Sprintf("Invalid number, unexpected digit after 0: %c", code))
 			}
 		} else {
 			for l.currPos < len(l.source) {
@@ -257,33 +256,76 @@ func (l *Lexer) readToken() (Token, error) {
 
 		// read number
 		if isFloat {
-			return Token{kind: FLOAT, value: l.source[startPos:l.currPos], pos: startPos}, nil
+			return &Token{kind: FLOAT, value: l.source[startPos:l.currPos], pos: startPos}, nil
 		}
-		return Token{kind: INT, value: l.source[startPos:l.currPos], pos: startPos}, nil
+		return &Token{kind: INT, value: l.source[startPos:l.currPos], pos: startPos}, nil
 	case firstChar == '"':
 		var code rune
 		var size int
+		val := ""
 
 		for l.currPos < len(l.source) {
 			code, size = utf8.DecodeRuneInString(l.source[l.currPos:])
-			if ((code >= 0x0020 && code <= 0xFFFF) || code == 0x0009) && code != '"' && code != 0x005C && code != 0x000A && code != 0x000D {
+			if ((code >= 0x0020 && code <= 0xFFFF) || code == 0x0009) && code != '"' && code != '\\' && code != 0x000A && code != 0x000D {
 				l.currPos += size
+				val += string(code)
 				continue
 			}
-			// TODO: handle unicode escape seq
+
+			if code == '\\' {
+				l.currPos += size
+				code, size = utf8.DecodeRuneInString(l.source[l.currPos:])
+				switch code {
+				case '"':
+					val += "\""
+					l.currPos += size
+				case '/':
+					val += "/"
+					l.currPos += size
+				case '\\':
+					val += "\\"
+					l.currPos += size
+				case 'b':
+					val += "\b"
+					l.currPos += size
+				case 'f':
+					val += "\f"
+					l.currPos += size
+				case 'n':
+					val += "\n"
+					l.currPos += size
+				case 'r':
+					val += "\r"
+					l.currPos += size
+				case 't':
+					val += "\t"
+					l.currPos += size
+				case 'u': // escape
+					v, err := unicodeToChar(l.source[l.currPos+1:])
+
+					if err != nil {
+						return nil, lexError("Invalid escape sequence")
+					}
+
+					val += string(v)
+					l.currPos += 5
+				}
+				continue
+			}
+
 			break
 		}
 
 		if code == '"' {
 			l.currPos += size
 		} else {
-			return Token{}, lexError(fmt.Sprintf("Invalid end of string '%c'", code))
+			return nil, lexError(fmt.Sprintf("Invalid end of string '%c'", code))
 		}
 
-		return Token{kind: STRING, value: l.source[startPos:l.currPos], pos: startPos}, nil
+		return &Token{kind: STRING, value: val, pos: startPos}, nil
 	}
 
-	return Token{}, lexError(fmt.Sprintf("Invalid charactère code '%c'", firstChar))
+	return nil, lexError(fmt.Sprintf("Invalid charactère code '%c'", firstChar))
 }
 
 func positionAfterWhitespace(l *Lexer) {
@@ -297,4 +339,30 @@ func positionAfterWhitespace(l *Lexer) {
 			break
 		}
 	}
+}
+
+func unhex(b byte) (v rune, ok bool) {
+	c := rune(b)
+	switch {
+	case '0' <= c && c <= '9':
+		return c - '0', true
+	case 'a' <= c && c <= 'f':
+		return c - 'a' + 10, true
+	case 'A' <= c && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return
+}
+
+func unicodeToChar(s string) (string, error) {
+	var v rune
+	for j := 0; j < 4; j++ {
+		x, ok := unhex(s[j])
+		if !ok {
+			return "", errors.New("Invalid syntax")
+		}
+		v = v<<4 | x
+	}
+
+	return string(v), nil
 }
