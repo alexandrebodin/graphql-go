@@ -1,4 +1,4 @@
-package parser
+package lexer
 
 import (
 	"errors"
@@ -16,13 +16,13 @@ type Lexer struct {
 
 // A Token is a lexed token
 type Token struct {
-	kind  tokenType
-	value string
-	pos   int
+	Kind  tokenType
+	Value string
+	Pos   int
 }
 
 func (t Token) String() string {
-	return fmt.Sprintf("%v(\"%s\")", t.kind, t.value)
+	return fmt.Sprintf("%v(\"%s\")", t.Kind, t.Value)
 }
 
 type tokenType int
@@ -105,33 +105,13 @@ func (err lexError) Error() string {
 	return string(err)
 }
 
-// CreateLexer returns a new lexer instance
-func CreateLexer(source string) *Lexer {
+// New returns a new lexer instance
+func New(source string) *Lexer {
 	return &Lexer{source: source, currPos: 0}
 }
 
-// Run will start the lexing process
-func (l *Lexer) Run() []Token {
-	var tokens []Token
-
-	for {
-		token, err := l.readToken()
-		if err != nil {
-			fmt.Println(err)
-			break
-		}
-
-		tokens = append(tokens, *token)
-
-		if token.kind == EOF {
-			break
-		}
-	}
-
-	return tokens
-}
-
-func (l *Lexer) readToken() (*Token, error) {
+// ReadToken returns the next token
+func (l *Lexer) ReadToken() (*Token, error) {
 
 	positionAfterWhitespace(l)
 
@@ -157,7 +137,7 @@ func (l *Lexer) readToken() (*Token, error) {
 				break //end of comment
 			}
 		}
-		return &Token{kind: COMMENT, value: l.source[startPos:l.currPos], pos: startPos}, nil
+		return &Token{Kind: COMMENT, Value: l.source[startPos:l.currPos], Pos: startPos}, nil
 	case firstChar == '{':
 		return &Token{BRACE_L, "{", startPos}, nil
 	case firstChar == '}':
@@ -194,7 +174,7 @@ func (l *Lexer) readToken() (*Token, error) {
 				break //end of comment
 			}
 		}
-		return &Token{kind: NAME, value: l.source[startPos:l.currPos], pos: startPos}, nil
+		return &Token{Kind: NAME, Value: l.source[startPos:l.currPos], Pos: startPos}, nil
 	case (firstChar >= '0' && firstChar <= '9') || firstChar == '-':
 		isFloat := false
 		var code = firstChar
@@ -256,9 +236,9 @@ func (l *Lexer) readToken() (*Token, error) {
 
 		// read number
 		if isFloat {
-			return &Token{kind: FLOAT, value: l.source[startPos:l.currPos], pos: startPos}, nil
+			return &Token{Kind: FLOAT, Value: l.source[startPos:l.currPos], Pos: startPos}, nil
 		}
-		return &Token{kind: INT, value: l.source[startPos:l.currPos], pos: startPos}, nil
+		return &Token{Kind: INT, Value: l.source[startPos:l.currPos], Pos: startPos}, nil
 	case firstChar == '"':
 		var code rune
 		var size int
@@ -319,13 +299,17 @@ func (l *Lexer) readToken() (*Token, error) {
 		if code == '"' {
 			l.currPos += size
 		} else {
-			return nil, lexError(fmt.Sprintf("Invalid end of string '%c'", code))
+			return nil, lexError(fmt.Sprintf("Invalid end of string %U", code))
 		}
 
-		return &Token{kind: STRING, value: val, pos: startPos}, nil
+		return &Token{Kind: STRING, Value: val, Pos: startPos}, nil
 	}
 
 	return nil, lexError(fmt.Sprintf("Invalid charactère code '%c'", firstChar))
+}
+
+func readNumber(l *Lexer) {
+
 }
 
 func positionAfterWhitespace(l *Lexer) {
