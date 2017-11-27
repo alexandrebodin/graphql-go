@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"fmt"
+	"log"
 
 	"github.com/alexandrebodin/graphql-go/lexer"
 )
@@ -21,10 +21,10 @@ func parseDocument(l *lexer.Lexer) []lexer.Token {
 	var tokens []lexer.Token
 
 	for {
-		token, err := l.ReadToken()
-		if err != nil {
-			fmt.Println(err)
-			break
+		token := l.ReadToken()
+
+		if token.Kind == lexer.LEX_ERROR {
+			log.Fatalf("Error parsing: %s", token.Value)
 		}
 
 		tokens = append(tokens, *token)
