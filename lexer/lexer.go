@@ -12,16 +12,17 @@ import (
 type Lexer struct {
 	source  string
 	currPos int
+	Token   *Token
 }
 
 // A Token is a lexed token
 type Token struct {
-	Kind  tokenType
+	Kind  TokenType
 	Value string
 	Pos   int
 }
 
-func newToken(typ tokenType, pos int, val ...string) *Token {
+func newToken(typ TokenType, pos int, val ...string) *Token {
 	if len(val) > 0 {
 		return &Token{typ, val[0], pos}
 	}
@@ -36,10 +37,12 @@ func (t Token) String() string {
 	return fmt.Sprintf("%v", t.Kind)
 }
 
-type tokenType int
+// TokenType represent the different token types
+type TokenType int
 
 const (
-	EOF tokenType = iota
+	SOF TokenType = iota
+	EOF
 	BANG
 	DOLLAR
 	PAREN_L
@@ -61,8 +64,10 @@ const (
 	LEX_ERROR
 )
 
-func (t tokenType) String() string {
+func (t TokenType) String() string {
 	switch t {
+	case SOF:
+		return "SOF"
 	case EOF:
 		return "EOF"
 	case BANG:
@@ -109,11 +114,27 @@ func (t tokenType) String() string {
 
 // New returns a new lexer instance
 func New(source string) *Lexer {
-	return &Lexer{source: source, currPos: 0}
+	return &Lexer{source: source, currPos: 0, Token: &Token{Kind: SOF, Pos: 0}}
+}
+
+// Next returns the next valid token ignoring comments
+func (l *Lexer) Next() *Token {
+	var token *Token
+	if l.Token.Kind != EOF {
+		for {
+			token = l.readToken()
+			l.Token = token
+			if token.Kind != COMMENT {
+				break
+			}
+		}
+	}
+
+	return token
 }
 
 // ReadToken returns the next token
-func (l *Lexer) ReadToken() *Token {
+func (l *Lexer) readToken() *Token {
 	positionAfterWhitespace(l)
 
 	if l.currPos >= len(l.source) {
