@@ -1,2 +1,2 @@
-# graphq-go
+# graphql-go
 A graphql go implementation
