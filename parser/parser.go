@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
+	"log"
 
 	"github.com/alexandrebodin/graphql-go/lexer"
 )
@@ -10,9 +12,10 @@ import (
 type DefinitionType string
 
 const (
-	Query    DefinitionType = "Query"
-	Mutation                = "Mutation"
-	Fragment                = "Fragment"
+	Query        DefinitionType = "Query"
+	Mutation                    = "Mutation"
+	Subscription                = "Subscription"
+	Fragment                    = "Fragment"
 )
 
 // GraphQLDocument is the representation of a parsed graphql schema or query
@@ -26,15 +29,31 @@ func (d GraphQLDocument) String() string {
 
 // GraphQLDefinition represent a graphql definition operation or fragment
 type GraphQLDefinition struct {
-	Kind         DefinitionType
-	SelectionSet GraphqlSelectionSet
+	Kind                DefinitionType
+	SelectionSet        GraphQLSelectionSet
+	VariableDefinitions GraphQLVariableDefinitions
+	Name                GraphQLName
+}
+
+type GraphQLVariableDefinitions []GraphQLVariableDefinition
+
+type GraphQLVariableDefinition struct {
 }
 
 // GraphQLDefinitions a list of GraphQLDefinition
 type GraphQLDefinitions []GraphQLDefinition
 
-// GraphqlSelectionSet represent the information that an operation requests
-type GraphqlSelectionSet struct {
+// GraphQLSelectionSet represent the information that an operation requests
+type GraphQLSelectionSet struct {
+}
+
+// GraphQLName can be an operation name or sth else
+type GraphQLName struct {
+	value string
+}
+
+func (n GraphQLName) String() string {
+	return fmt.Sprintf("GraphqlName{value: %s}", n.value)
 }
 
 // Parse parses a graphql schema or query
@@ -48,15 +67,19 @@ func parseDocument(l *lexer.Lexer) GraphQLDocument {
 
 	expect(l, lexer.SOF)
 	for !skip(l, lexer.EOF) {
-		definitions = append(definitions, parseDefinition(l))
+		def, err := parseDefinition(l)
+		if err != nil {
+			log.Fatal(err)
+		}
+		definitions = append(definitions, def)
 	}
 
 	return GraphQLDocument{definitions}
 }
 
-func parseDefinition(l *lexer.Lexer) GraphQLDefinition {
+func parseDefinition(l *lexer.Lexer) (GraphQLDefinition, error) {
 	if peek(l, lexer.BRACE_L) {
-		return parserOperatonDefinition(l)
+		return parserOperatonDefinition(l), nil
 	}
 
 	if peek(l, lexer.NAME) {
@@ -64,19 +87,21 @@ func parseDefinition(l *lexer.Lexer) GraphQLDefinition {
 		case "query":
 			fallthrough
 		case "mutation":
+			fallthrough
 		case "subscription":
 			fmt.Printf("Parsing %v\n", l.Token.Value)
-			return parserOperatonDefinition(l)
+			return parserOperatonDefinition(l), nil
 		case "fragment":
 			fmt.Println("Parsing fragment")
-			return GraphQLDefinition{Kind: Fragment}
+			return GraphQLDefinition{Kind: Fragment}, nil
 		}
 	}
 
-	return GraphQLDefinition{}
+	return GraphQLDefinition{}, errors.New("Invalid operation")
 }
 
 func parserOperatonDefinition(l *lexer.Lexer) GraphQLDefinition {
+
 	if peek(l, lexer.BRACE_L) {
 		// shorthand query
 		return GraphQLDefinition{
@@ -84,14 +109,56 @@ func parserOperatonDefinition(l *lexer.Lexer) GraphQLDefinition {
 			SelectionSet: parseSelectionSet(l),
 		}
 	}
-	return GraphQLDefinition{}
+
+	t := expect(l, lexer.NAME)
+	var opType DefinitionType
+	switch t.Value {
+	case "query":
+		opType = Query
+	case "mutation":
+		opType = Mutation
+	case "subscription":
+		opType = Subscription
+	}
+
+	name := GraphQLName{}
+	if peek(l, lexer.NAME) {
+		nameToken := expect(l, lexer.NAME)
+		name = GraphQLName{nameToken.Value}
+	}
+
+	return GraphQLDefinition{
+		Kind:                opType,
+		Name:                name,
+		VariableDefinitions: parseVariableDefinitions(l),
+		SelectionSet:        parseSelectionSet(l),
+	}
 }
 
-func parseSelectionSet(l *lexer.Lexer) GraphqlSelectionSet {
+func parseVariableDefinitions(l *lexer.Lexer) GraphQLVariableDefinitions {
+	if peek(l, lexer.PAREN_L) {
+		expect(l, lexer.PAREN_L)
+		definitions := GraphQLVariableDefinitions{}
+
+		for !skip(l, lexer.PAREN_R) {
+			definitions = append(definitions, parseVariableDefinition(l))
+		}
+
+		return definitions
+	}
+
+	return GraphQLVariableDefinitions{}
+}
+
+func parseVariableDefinition(l *lexer.Lexer) GraphQLVariableDefinition {
+	return GraphQLVariableDefinition{}
+}
+
+func parseSelectionSet(l *lexer.Lexer) GraphQLSelectionSet {
 	for !skip(l, lexer.EOF) {
 		l.Next()
 	}
-	return GraphqlSelectionSet{}
+	return GraphQLSelectionSet{}
 }
 
 func expect(l *lexer.Lexer, kind lexer.TokenType) *lexer.Token {
@@ -101,7 +168,8 @@ func expect(l *lexer.Lexer, kind lexer.TokenType) *lexer.Token {
 		return t
 	}
 
-	panic("Oh my GAAAAD the unexpected happened")
+	err := fmt.Errorf("Unexpected token %s, expected %s", t.Kind, kind)
+	panic(err)
 }
 
 func skip(l *lexer.Lexer, kind lexer.TokenType) bool {
