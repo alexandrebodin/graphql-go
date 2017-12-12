@@ -23,10 +23,6 @@ type GraphQLDocument struct {
 	Definitions GraphQLDefinitions
 }
 
-func (d GraphQLDocument) String() string {
-	return fmt.Sprintf("GraphqlDocument{Defintions: %+v}", d.Definitions)
-}
-
 // GraphQLDefinition represent a graphql definition operation or fragment
 type GraphQLDefinition struct {
 	Kind                DefinitionType
@@ -35,9 +31,16 @@ type GraphQLDefinition struct {
 	Name                GraphQLName
 }
 
+type GraphQLName struct {
+	value string
+}
+
 type GraphQLVariableDefinitions []GraphQLVariableDefinition
 
 type GraphQLVariableDefinition struct {
+	Name         string
+	Type         GraphQLType
+	DefaultValue *lexer.Token
 }
 
 // GraphQLDefinitions a list of GraphQLDefinition
@@ -47,14 +50,19 @@ type GraphQLDefinitions []GraphQLDefinition
 type GraphQLSelectionSet struct {
 }
 
-// GraphQLName can be an operation name or sth else
-type GraphQLName struct {
-	value string
+type GraphQLType struct {
+	Value string
+	Kind  InputType
+	Type  *GraphQLType
 }
 
-func (n GraphQLName) String() string {
-	return fmt.Sprintf("GraphqlName{value: %s}", n.value)
-}
+type InputType string
+
+const (
+	NamedType   InputType = "NamedType"
+	ListType              = "ListType"
+	NonNullType           = "NonNullType"
+)
 
 // Parse parses a graphql schema or query
 func Parse(source string) GraphQLDocument {
@@ -89,10 +97,8 @@ func parseDefinition(l *lexer.Lexer) (GraphQLDefinition, error) {
 		case "mutation":
 			fallthrough
 		case "subscription":
-			fmt.Printf("Parsing %v\n", l.Token.Value)
 			return parserOperatonDefinition(l), nil
 		case "fragment":
-			fmt.Println("Parsing fragment")
 			return GraphQLDefinition{Kind: Fragment}, nil
 		}
 	}
@@ -151,7 +157,55 @@ func parseVariableDefinitions(l *lexer.Lexer) GraphQLVariableDefinitions {
 }
 
 func parseVariableDefinition(l *lexer.Lexer) GraphQLVariableDefinition {
-	return GraphQLVariableDefinition{}
+
+	expect(l, lexer.DOLLAR)
+	nameToken := expect(l, lexer.NAME)
+	expect(l, lexer.COLON)
+	typeToken := parseInputType(l)
+	var defaultValue *lexer.Token
+
+	if peek(l, lexer.EQUALS) {
+		l.Next()
+		defaultValue = parseValue(l)
+	}
+
+	return GraphQLVariableDefinition{
+		Name:         nameToken.Value,
+		Type:         typeToken,
+		DefaultValue: defaultValue,
+	}
+}
+
+func parseInputType(l *lexer.Lexer) GraphQLType {
+	var typ GraphQLType
+
+	if peek(l, lexer.NAME) {
+		val := expect(l, lexer.NAME)
+		typ = GraphQLType{Value: val.Value, Kind: NamedType}
+	}
+
+	if peek(l, lexer.BRACKET_L) {
+		expect(l, lexer.BRACKET_L)
+		val := expect(l, lexer.NAME)
+		expect(l, lexer.BRACKET_R)
+		typ = GraphQLType{Value: val.Value, Kind: ListType}
+	}
+
+	if peek(l, lexer.BANG) {
+		// return non null type
+		l.Next()
+		typ = GraphQLType{
+			Value: typ.Value,
+			Kind:  NonNullType,
+			Type:  &typ,
+		}
+	}
+
+	return typ
+}
+
+func parseValue(l *lexer.Lexer) *lexer.Token {
+	return l.Next()
 }
 
 func parseSelectionSet(l *lexer.Lexer) GraphQLSelectionSet {
