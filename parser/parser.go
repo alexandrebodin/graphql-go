@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/alexandrebodin/graphql-go/lexer"
+	"graphql-go/lexer"
 )
 
 // DefinitionType represents an AST Node Kind
